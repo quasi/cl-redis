@@ -327,4 +327,40 @@ transparently reopen it."
                        (invoke-restart :reconnect))))
        ,@body)))
 
+;;; Connection Pooling
+
+(defun make-connection-pool (&key (host #(127 0 0 1))
+                                  (port 6379)
+                                  auth
+                                  ssl
+                                  verify
+                                  certificate
+                                  key
+                                  cipher-list
+                                  (max-size 10)
+                                  (timeout 5))
+  "Create a connection pool."
+  (pooler:make-pool
+   :item-maker (lambda ()
+                 (make-instance 'redis-connection
+                                :host host
+                                :port port
+                                :auth auth
+                                :ssl ssl
+                                :verify verify
+                                :certificate certificate
+                                :key key
+                                :cipher-list cipher-list))
+   :item-destroyer (lambda (conn) (close-connection conn))
+   :capacity max-size
+   :timeout timeout))
+
+(defmacro with-pooled-connection ((pool) &body body)
+  "Execute BODY with *CONNECTION* bound to a connection from POOL."
+  `(pooler:with-pool (conn ,pool)
+     (let ((*connection* conn))
+       (unless (connection-open-p conn)
+         (reopen-connection conn))
+       ,@body)))
+
 ;;; end

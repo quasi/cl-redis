@@ -7,7 +7,7 @@
 (defpackage #:redis
   (:use #:common-lisp #:rutil)
   (:shadow #:quit #:sort #:set #:get #:substr #:eval #:type #:append
-           #:watch #:unwatch #:shutdown #:time #:keys)
+           #:watch #:unwatch #:shutdown #:time #:keys #:function)
   (:export #:redis-connection
            #:connect
            #:disconnect
@@ -19,6 +19,8 @@
            #:with-connection
            #:with-recursive-connection
            #:with-persistent-connection
+           #:make-connection-pool
+           #:with-pooled-connection
 
            #:*echo-p*
            #:*echo-stream*

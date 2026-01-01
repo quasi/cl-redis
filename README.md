@@ -1,5 +1,5 @@
 # CL-REDIS — A fast and robust Common Lisp client for Redis
-  (tested with Redis version 3.0.0 (2.9.104 to be precise))
+  (tested with Redis version 7.2)
 
 ## Usage
 
@@ -24,9 +24,26 @@ CL-USER> (red:ping)
    bound to this new connection, and ensures that the connection is closed
    afterwards.
 
-### Available commands
+### Connection Pooling
 
+CL-Redis supports connection pooling using the `pooler` library.
 
+```lisp
+(defparameter *pool* (redis:make-connection-pool :host "127.0.0.1" :port 6379 :max-size 10))
+
+(redis:with-pooled-connection (*pool*)
+  (red:ping))
+```
+
+### RESP3 Support
+
+CL-Redis supports RESP3 protocol. To switch to RESP3 mode, use the `HELLO` command at the start of the connection.
+
+```lisp
+(with-connection ()
+  (red:hello 3) ;; Handshake RESP3
+  (red:hgetall "myhash")) ;; Returns Map (alist) instead of list
+```
 
 ### Code organization
 
@@ -51,7 +68,8 @@ Available through [quicklisp](http://quicklisp.org/).
 - [usocket](http://common-lisp.net/project/usocket/)
 - [flexi-streams](http://common-lisp.net/project/flexi-streams/)
 - [rutils](http://github.com/vseloved/rutils)
-- only for tests: [nuts](http://github.com/vseloved/nuts),
+- [pooler](https://github.com/fukamachi/pooler)
+- only for tests: [should-test](https://github.com/vseloved/should-test),
   [bordeaux-threads](http://common-lisp.net/project/bordeaux-threads)
 
 
@@ -194,11 +212,6 @@ See `commands.lisp` for all defined commands.
 - [Consistent hashing](http://en.wikipedia.org/wiki/Consistent_hashing)
   isn't built-in.  Actually, such thing is orthogonal to the functionality
   of this library and, probably, should be implemented in a separate library.
-- Connection pooling is also not implemented, because in the presence of
-  `with-persistent-connection` it is actually not needed so much.
-  Persistent connections are more simple, efficient and less error-prone
-  for dedicated threads.  But there are other use-cases for pooling,
-  so it will probably be implemented in future releases.
 
 
 ## Credits
