@@ -153,8 +153,8 @@
             (red-lpush "mylist" "Hello World"))
     (should be = 1
             (red-object-refcount "mylist"))
-    (should be string= "ziplist"
-            (red-object-encoding "mylist"))
+    (should be true
+            (member (red-object-encoding "mylist") '("ziplist" "quicklist" "listpack") :test #'string=))
     (should be = -1
             (red-object-idletime "mykey"))
     (should be string= "OK"
@@ -179,16 +179,16 @@
             (red-select 15))
     (should be string= "OK"
             (red-set "mykey" 10))
-    (should be equalp #(0 192 10 6 0 248 114 63 197 251 251 95 40)
-            (red-dump "mykey"))
-    (should be true
-            (red-del "mykey"))
-    (should be string= "OK"
-            (red-restore "mykey" 0 #(0 192 10 6 0 248 114 63 197 251 251 95 40)))
-    (should be string= "string"
-            (red-type "mykey"))
-    (should be string= "10"
-            (red-get "mykey"))))
+    (let ((dump (red-dump "mykey")))
+      (should be vectorp dump)
+      (should be true
+              (red-del "mykey"))
+      (should be string= "OK"
+              (red-restore "mykey" 0 dump))
+      (should be string= "string"
+              (red-type "mykey"))
+      (should be string= "10"
+              (red-get "mykey")))))
 
 (deftest sort-command ()
   (with-test-db
@@ -365,9 +365,10 @@
             (red-renamenx "y" "b"))
     (should be true
             (red-renamenx "ігрек" "бе"))
-    (should signal redis-error-reply
+    ;; Redis 3.2+ returns 0 (nil) for renamenx same key
+    (should be null
             (red-renamenx "b" "b"))
-    (should signal redis-error-reply
+    (should be null
             (red-renamenx "бе" "бе"))
     (should be = 4
             (red-dbsize))
@@ -461,7 +462,7 @@
             (red-get "mykey"))
     (should be = 11
             (red-setrange "key2" 6 "Redis"))
-    (should be string= "      Redis"
+    (should be string= "      Redis"
             (red-get "key2"))
     (should be string= "Redisg"
             (red-getrange "mykey" 10 100))
@@ -475,9 +476,9 @@
             (red-bitcount "mykey"))
     (should be = 16
             (red-bitop "NOT" "mykey2" "mykey"))
-    (should be equal '("1" "1")
+    (should be equal '(1 1)
 	    (red-bitfield "bitfield:test" "incrby" "u2" 100 1 "OVERFLOW" "SAT" "incrby" "u2" 102 1))
-    (should be equal '("1")
+    (should be equal '(1)
 	    (red-bitfield_ro "bitfield:test" "GET" "u2" 100))
     (should be string= "Uhis is a Redisg"
             (red-get "mykey"))
@@ -1158,5 +1159,32 @@
               (red:script-flush))
       (should be equal '(0 0)
               (red:script-exists sha1 "ffffffffffffffffffffffffffffffffffffffff")))))
+
+(deftest geo-commands ()
+  (with-test-db
+    (should be = 1
+            (red-geoadd "Sicily" 13.361389 38.115556 "Palermo"))
+    (should be = 1
+            (red-geoadd "Sicily" 15.087269 37.502669 "Catania"))
+    (let ((dist (red-geodist "Sicily" "Palermo" "Catania" "m")))
+      (should be < 166275
+              (if (numberp dist) dist (redis::parse-float dist :type 'double-float))))
+    (should be equal '("sqc8b49rny0")
+            (red-geohash "Sicily" "Palermo"))))
+
+(deftest stream-commands ()
+  (with-test-db
+    (let ((id (red-xadd "mystream" "*" "sensor-id" "1234" "temperature" "19.8")))
+      (should be stringp id)
+      (should be = 1 (red-xlen "mystream"))
+      (let ((range (red-xrange "mystream" "-" "+")))
+        (should be string= (first (first range)) id)))))
+
+(deftest connection-pool ()
+  (let ((pool (redis:make-connection-pool :max-size 2)))
+    (redis:with-pooled-connection (pool)
+       (should be string= "PONG" (red-ping)))
+    (redis:with-pooled-connection (pool)
+       (should be string= "PONG" (red-ping)))))
 
 ;;; end

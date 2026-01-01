@@ -22,6 +22,28 @@
 (def-cmd ECHO (message) :bulk
   "Returns message.")
 
+(def-cmd HELLO (&rest args) :map
+  "Handshake with Redis server to set protocol version.
+   PROTO-VER is integer 2 or 3.
+   AUTH is list (username password) or (password) or string password.
+   SETNAME is string.")
+
+(defmethod tell ((cmd (eql 'HELLO)) &rest args)
+  (let ((cmd-args '()))
+    (if (and args (numberp (first args)))
+        (push (pop args) cmd-args)
+        (push 3 cmd-args)) ;; Default to 3
+    (destructuring-bind (&key auth setname) args
+      (when auth
+        (push "AUTH" cmd-args)
+        (if (listp auth)
+            (setf cmd-args (nconc (reverse auth) cmd-args))
+            (push auth cmd-args)))
+      (when setname
+        (push "SETNAME" cmd-args)
+        (push setname cmd-args)))
+    (apply #'tell "HELLO" (nreverse cmd-args))))
+
 
 ;;; Any key type commands
 
@@ -859,5 +881,91 @@ Note: before/after can only have 2 values: :before or :after.")
 
 
 ;;; not supported commands: MONITOR, DEBUG OBJECT, DEBUG SEGFAULT - use redis-cli for that
+
+;;; Geo commands
+
+(def-cmd GEOADD (key longitude latitude member &rest args) :integer
+  "Adds the specified geospatial items (longitude, latitude, name) to the specified key.")
+
+(def-cmd GEODIST (key member1 member2 &optional unit) :bulk
+  "Returns the distance between two members of a geospatial index.")
+
+(def-cmd GEOHASH (key member &rest members) :multi
+  "Returns members of a geospatial index as standard geohash strings.")
+
+(def-cmd GEOPOS (key member &rest members) :multi
+  "Returns longitude and latitude of members of a geospatial index.")
+
+(def-cmd GEORADIUS (key longitude latitude radius unit &rest args) :multi
+  "Query a sorted set representing a geospatial index to fetch members matching a given maximum distance from a point.")
+
+(def-cmd GEORADIUSBYMEMBER (key member radius unit &rest args) :multi
+  "Query a sorted set representing a geospatial index to fetch members matching a given maximum distance from a member.")
+
+(def-cmd GEOSEARCH (key &rest args) :multi
+  "Query a sorted set representing a geospatial index to fetch members inside an area of a box or a circle.")
+
+(def-cmd GEOSEARCHSTORE (destination source &rest args) :integer
+  "Query a sorted set representing a geospatial index to fetch members inside an area of a box or a circle, and store the result in a key.")
+
+
+;;; Stream commands
+
+(def-cmd XADD (key id field value &rest args) :bulk
+  "Appends a new entry to a stream.")
+
+(def-cmd XLEN (key) :integer
+  "Returns the number of entries of a stream.")
+
+(def-cmd XDEL (key id &rest ids) :integer
+  "Removes the specified entries from the stream. Returns the number of items actually deleted.")
+
+(def-cmd XRANGE (key start end &rest args) :multi
+  "Returns the stream entries matching a given range of IDs.")
+
+(def-cmd XREVRANGE (key end start &rest args) :multi
+  "Returns the stream entries matching a given range of IDs, in reverse order.")
+
+(def-cmd XREAD (&rest args) :multi
+  "Read data from one or multiple streams, only returning entries with an ID greater than the last received ID reported by the caller.")
+
+(def-cmd XGROUP (subcommand key groupname &rest args) :status
+  "Create, destroy, and manage consumer groups.")
+
+(def-cmd XREADGROUP (subcommand group consumer &rest args) :multi
+  "Read data from one or multiple streams via a consumer group.")
+
+(def-cmd XACK (key group id &rest ids) :integer
+  "Marks the pending messages as correctly processed, allowing the removal of such messages from the PEL of the consumer group.")
+
+(def-cmd XCLAIM (key group consumer min-idle-time id &rest args) :multi
+  "Changes (or acquires) ownership of a message in a consumer group, as if the message was delivered to the specified consumer.")
+
+(def-cmd XAUTOCLAIM (key group consumer min-idle-time start &rest args) :multi
+  "Transfers ownership of pending stream entries that match the specified criteria.")
+
+(def-cmd XINFO (subcommand key &rest args) :multi
+  "Get information on streams and consumer groups.")
+
+(def-cmd XTRIM (key maxlen &rest args) :integer
+  "Trims the stream to a different length.")
+
+
+;;; ACL commands
+
+(def-cmd ACL (subcommand &rest args) :multi
+  "Access Control List command.")
+
+
+;;; Function commands
+
+(def-cmd FUNCTION (subcommand &rest args) :multi
+  "Manage Redis Functions.")
+
+(def-cmd FCALL (function numkeys &rest args) :anything
+  "Invoke a function.")
+
+(def-cmd FCALL_RO (function numkeys &rest args) :anything
+  "Invoke a read-only function.")
 
 ;;; end

@@ -152,7 +152,10 @@ server with the first character removed."
            (if (string= ,line "+QUEUED") "QUEUED"
                (case ,char
                  (#\- (error 'redis-error-reply :message reply))
-                 ((#\+ #\: #\$ #\*) ,@body)
+                 (#\! (error 'redis-error-reply :message (read-bulk-reply)))
+                 ((#\+ #\: #\$ #\* #\% #\~ #\_ #\# #\, #\( #\= #\>)
+                  (let ((char ,char))
+                    ,@body))
                  (otherwise
                   (error 'redis-bad-reply
                          :message (fmt "Received ~C as the initial reply byte."
@@ -163,10 +166,29 @@ server with the first character removed."
   "Receive and process status reply, which is just a string, preceeded with +."
   (case (peek-char nil (conn-stream *connection*))
     (#\+ (expect :status))
+    (#\- (expect :error))
     (#\: (expect :integer))
     (#\$ (expect :bulk))
     (#\* (expect :multi))
+    (#\% (expect :map))
+    (#\~ (expect :set))
+    (#\_ (expect :null))
+    (#\# (expect :boolean))
+    (#\, (expect :double))
+    (#\( (expect :bignum))
+    (#\! (expect :bulk-error))
+    (#\= (expect :verbatim-string))
+    (#\> (expect :push))
     (otherwise (expect :status))))  ; will do error-signalling
+
+(defmethod expect ((type (eql :error)) &key &allow-other-keys)
+  (with-redis-in (line char)
+    (error 'redis-error-reply :message (subseq line 1))))
+
+(defmethod expect ((type (eql :bulk-error)) &key &allow-other-keys)
+  (with-redis-in (line char)
+    (let ((reply (subseq line 1)))
+       (error 'redis-error-reply :message (read-bulk-reply)))))
 
 (defmethod expect ((type (eql :status)) &key &allow-other-keys)
   "Receive and process status reply, which is just a string, preceeded with +."
@@ -182,9 +204,12 @@ server with the first character removed."
   reply)
 
 (def-expect-method :boolean
-  (ecase (char reply 0)
+  (case (char reply 0)
+    (#\t t)
+    (#\f nil)
+    (#\1 t)
     (#\0 nil)
-    (#\1 t)))
+    (otherwise nil)))
 
 (def-expect-method :integer
   (values (parse-integer reply)))
@@ -208,16 +233,48 @@ server with the first character removed."
                 bytes))))))
 
 (def-expect-method :bulk
-  (read-bulk-reply))
+  (case char
+    (#\_ nil)
+    (#\= (read-bulk-reply :post-processing (lambda (x) (subseq x 4))))
+    (otherwise (read-bulk-reply))))
 
 (def-expect-method :multi
   (let ((n (parse-integer reply)))
     (unless (= n -1)
-      (loop :repeat n
-         :collect (ecase (peek-char nil (conn-stream *connection*))
-                    (#\: (expect :integer))
-                    (#\$ (expect :bulk))
-                    (#\* (expect :multi)))))))
+      (case char
+        (#\% (loop :repeat (* 2 n) :collect (expect :anything)))
+        (otherwise
+         (loop :repeat n :collect (expect :anything)))))))
+
+(def-expect-method :map
+  (let ((n (parse-integer reply)))
+    (loop :repeat n
+       :collect (cons (expect :anything) (expect :anything)))))
+
+(def-expect-method :set
+  (let ((n (parse-integer reply)))
+    (loop :repeat n
+       :collect (expect :anything))))
+
+(def-expect-method :null
+  nil)
+
+(def-expect-method :double
+  (parse-float reply :type 'double-float))
+
+(def-expect-method :bignum
+  (parse-integer reply))
+
+(def-expect-method :verbatim-string
+  (read-bulk-reply :post-processing (lambda (x) (subseq x 4))))
+
+(def-expect-method :push
+  ;; Push messages are out-of-band data (like pubsub), often ignored or handled specially
+  ;; For now we just collect it like an array
+  (let ((n (parse-integer reply)))
+    (cons :push
+          (loop :repeat n
+             :collect (expect :anything)))))
 
 (def-expect-method :queued
   (let ((n (parse-integer reply)))
@@ -245,8 +302,11 @@ server with the first character removed."
   (cl-ppcre:split " " (expect :bulk)))
 
 (def-expect-method :float
-  (read-bulk-reply :post-processing (lambda (x)
-                                      (parse-float x :type 'double-float))))
+  (case char
+    (#\, (parse-float reply :type 'double-float))
+    (otherwise
+     (read-bulk-reply :post-processing (lambda (x)
+                                         (parse-float x :type 'double-float))))))
 
 (def-expect-method :bytes
   (read-bulk-reply :decode nil))
